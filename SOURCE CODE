@@ -1,0 +1,90 @@
+# 1. Load the dataset
+import pandas as pd
+
+# Adjust the path if needed
+df = pd.read_csv('/content/stock_data.csv')
+print("Shape of dataset:", df.shape)
+print("Columns:", df.columns.tolist())
+print(df.head())
+
+# 2. Basic EDA
+print(df.info())
+print(df.describe())
+print("Missing values:\n", df.isnull().sum())
+print("Duplicate rows:", df.duplicated().sum())
+
+# 3. Visualize key features
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Example: visualize closing price if exists
+if 'Close' in df.columns:
+    sns.histplot(df['Close'], kde=True)
+    plt.title("Distribution of Closing Prices")
+    plt.show()
+
+# 4. Feature Selection
+target = 'Close'  # You can change this
+features = df.columns.drop(target)
+print("Features:", features)
+
+# 5. Handle Categorical Features
+categorical_cols = df.select_dtypes(include='object').columns
+print("Categorical Columns:", categorical_cols)
+
+df_encoded = pd.get_dummies(df, drop_first=True)
+
+# 6. Feature Scaling
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(df_encoded.drop(target, axis=1))
+y = df_encoded[target]
+
+# 7. Train-Test Split
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# 8. Train Model
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+model = LinearRegression()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# 9. Evaluation
+print("MSE:", mean_squared_error(y_test, y_pred))
+print("R² Score:", r2_score(y_test, y_pred))
+
+# 10. Deploy with Gradio
+!pip install gradio --quiet
+
+import gradio as gr
+
+def predict_stock(**kwargs):
+    input_df = pd.DataFrame([kwargs])
+    df_temp = pd.concat([df.drop(target, axis=1), input_df], ignore_index=True)
+    df_temp_encoded = pd.get_dummies(df_temp, drop_first=True)
+    df_temp_encoded = df_temp_encoded.reindex(columns=df_encoded.drop(target, axis=1).columns, fill_value=0)
+    input_scaled = scaler.transform(df_temp_encoded.tail(1))
+    prediction = model.predict(input_scaled)
+    return round(prediction[0], 2)
+
+# Build Gradio input list dynamically
+input_components = []
+for col in features:
+    if col in categorical_cols:
+        options = df[col].dropna().unique().tolist()
+        input_components.append(gr.Dropdown(choices=options, label=col))
+    else:
+        input_components.append(gr.Number(label=col))
+
+output_component = gr.Number(label=f"📈 Predicted {target}")
+
+gr.Interface(
+    fn=predict_stock,
+    inputs=input_components,
+    outputs=output_component,
+    title="📊 Stock Price Predictor",
+    description=f"Enter stock data features to predict the {target}."
+).launch()
